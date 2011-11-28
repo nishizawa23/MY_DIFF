@@ -1,0 +1,89 @@
+diff --git a/frameworks/base/media/mediaserver/Android.mk b/frameworks/base/media/mediaserver/Android.mk
+index 0559812..f553138 100644
+--- a/frameworks/base/media/mediaserver/Android.mk
++++ b/frameworks/base/media/mediaserver/Android.mk
+@@ -9,14 +9,16 @@ LOCAL_SHARED_LIBRARIES := \
+ 	libcameraservice \
+ 	libmediaplayerservice \
+ 	libutils \
+-	libbinder
++	libbinder \
++	libsqlite
+ 
+ base := $(LOCAL_PATH)/../..
+ 
+ LOCAL_C_INCLUDES := \
+     $(base)/services/audioflinger \
+     $(base)/services/camera/libcameraservice \
+-    $(base)/media/libmediaplayerservice
++    $(base)/media/libmediaplayerservice \
++	$(base)/../../external/sqlite/dist
+ 
+ LOCAL_MODULE:= mediaserver
+ 
+diff --git a/frameworks/base/media/mediaserver/main_mediaserver.cpp b/frameworks/base/media/mediaserver/main_mediaserver.cpp
+index 5078377..51ab4f4 100644
+--- a/frameworks/base/media/mediaserver/main_mediaserver.cpp
++++ b/frameworks/base/media/mediaserver/main_mediaserver.cpp
+@@ -30,17 +30,58 @@
+ #include <MediaPlayerService.h>
+ #include <AudioPolicyService.h>
+ #include <private/android_filesystem_config.h>
++#include <sqlite3.h>
+ 
+ using namespace android;
+ 
++static int mode_ringer;
++
++static int _callback_exec(void * notused,int argc, char ** argv, char ** aszColName)
++{
++	int i;
++	for ( i=0; i<argc; i++ ){
++//		LOGI( "%s = %s\n", aszColName[i], argv[i] == 0 ? "NUL" : argv[i] );
++		if(strcmp(argv[i],"mode_ringer")==0){
++			if(*argv[i+1] == '1'){
++				mode_ringer = 1;
++				LOGI("mode_ringer vaule is %d\n",mode_ringer);
++			}
++		}
++	}
++	return 0;
++}
++
+ int main(int argc, char** argv)
+ {
++	const char * sSQL = "select * from system;";
++	char * pErrMsg = 0;
++	int ret = 0;
++	sqlite3 * db = 0;
++	ret = sqlite3_open("/data/data/com.android.providers.settings/databases/settings.db", &db);
++	if ( ret != SQLITE_OK ){
++		LOGI("Could not open database: %s", sqlite3_errmsg(db));
++	}
++	LOGI("Successfully connected to database\n");
++	ret = sqlite3_exec( db, sSQL, _callback_exec, 0, &pErrMsg );
++	if ( ret != SQLITE_OK ){
++		LOGI("SQL error: %s\n", pErrMsg);
++		sqlite3_free(pErrMsg);
++	}
++
++	sqlite3_close(db);
++	db = 0;
++
+     sp<ProcessState> proc(ProcessState::self());
+     sp<IServiceManager> sm = defaultServiceManager();
+     LOGI("ServiceManager: %p", sm.get());
+-    LOGI("Playing boot sound start.");
+-    int ret = system("/system/bin/alsa_aplay -e 6 /system/media/Start.wav");
+-    LOGI("Playing boot sound finish(%d).",ret);
++	if(mode_ringer == 1){
++		LOGI("Boot up with silent.");
++	}
++	else{
++		LOGI("Playing boot sound start.");
++		ret = system("/system/bin/alsa_aplay -e 6 /system/media/Start.wav");
++		LOGI("Playing boot sound finish(%d).",ret);
++	}
+     AudioFlinger::instantiate();
+     MediaPlayerService::instantiate();
+     CameraService::instantiate();
