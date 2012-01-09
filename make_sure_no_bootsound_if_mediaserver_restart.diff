@@ -1,0 +1,116 @@
+diff --git a/device/fsl/imx5x/init.rc b/device/fsl/imx5x/init.rc
+index 0f43e5d..340b229 100644
+--- a/device/fsl/imx5x/init.rc
++++ b/device/fsl/imx5x/init.rc
+@@ -306,6 +306,9 @@ on boot
+ # Define gst player property
+     setprop media.gstreamer.enable-player 0
+ 
++# Set 0 if mediaserver frist start
++	setprop  media.MEDIASERVER_FRIST_START 0
++
+ # Comment the usage of stageflight media framework
+     setprop  media.stagefright.enable-scan 0
+     setprop  media.stagefright.enable-player 0
+diff --git a/frameworks/base/media/mediaserver/Android.mk b/frameworks/base/media/mediaserver/Android.mk
+index f553138..0e8ab63 100644
+--- a/frameworks/base/media/mediaserver/Android.mk
++++ b/frameworks/base/media/mediaserver/Android.mk
+@@ -10,7 +10,8 @@ LOCAL_SHARED_LIBRARIES := \
+ 	libmediaplayerservice \
+ 	libutils \
+ 	libbinder \
+-	libsqlite
++	libsqlite \
++	libcutils
+ 
+ base := $(LOCAL_PATH)/../..
+ 
+diff --git a/frameworks/base/media/mediaserver/main_mediaserver.cpp b/frameworks/base/media/mediaserver/main_mediaserver.cpp
+index 87bfc5a..93415e7 100644
+--- a/frameworks/base/media/mediaserver/main_mediaserver.cpp
++++ b/frameworks/base/media/mediaserver/main_mediaserver.cpp
+@@ -31,6 +31,7 @@
+ #include <AudioPolicyService.h>
+ #include <private/android_filesystem_config.h>
+ #include <sqlite3.h>
++#include <cutils/properties.h>
+ 
+ using namespace android;
+ 
+@@ -101,24 +102,46 @@ static int _callback_exec(void * notused,int argc, char ** argv, char ** aszColN
+ 
+ int main(int argc, char** argv)
+ {
++	char first[PROPERTY_VALUE_MAX];
+ 	const char * sSQL = "select * from system;";
+ 	char * pErrMsg = 0;
+ 	int ret = 0;
+ 	sqlite3 * db = 0;
+-	ret = sqlite3_open("/data/data/com.android.providers.settings/databases/settings.db", &db);
+-	if ( ret == SQLITE_OK ){
+-        LOGI("Successfully connected to database\n");
+-        ret = sqlite3_exec( db, sSQL, _callback_exec, 0, &pErrMsg );
+-        if ( ret != SQLITE_OK ){
+-            LOGI("SQL error: \n");
+-            sqlite3_free(pErrMsg);
+-        }
+ 
+-        sqlite3_close(db);
+-        db = 0;
+-    } else {
+-        LOGI("Could not open database \n");
+-    }
++	property_get("media.MEDIASERVER_FRIST_START",first,NULL);
++
++	if(first != NULL){
++        LOGI("media.MEDIASERVER_FRIST_START is %s\n",first);
++
++		if(strcmp(first,"0")==0){
++			/*read database*/
++			ret = sqlite3_open("/data/data/com.android.providers.settings/databases/settings.db", &db);
++			if ( ret == SQLITE_OK ){
++				LOGI("Successfully connected to database\n");
++				ret = sqlite3_exec( db, sSQL, _callback_exec, 0, &pErrMsg );
++				if ( ret != SQLITE_OK ){
++					LOGI("SQL error: \n");
++					sqlite3_free(pErrMsg);
++				}
++
++			sqlite3_close(db);
++			db = 0;
++			} else {
++				LOGI("Could not open database \n");
++			}
++			/*set media.MEDIASERVER_FRIST_START 1*/
++			property_set("media.MEDIASERVER_FRIST_START", "1");
++			/*play sound*/
++			if(mode_ringer == 1){
++				LOGI("Boot up with silent.");
++			}
++			else{
++				LOGI("Playing boot sound start.");
++				ret = system("/system/bin/alsa_aplay -e 6 /system/media/Start.wav");
++				LOGI("Playing boot sound finish(%d).",ret);
++			}
++		}
++	}
+ 
+     sp<ProcessState> proc(ProcessState::self());
+     sp<IServiceManager> sm = defaultServiceManager();
+@@ -126,14 +149,7 @@ int main(int argc, char** argv)
+ 
+     android_set_system_time();
+ 
+-	if(mode_ringer == 1){
+-		LOGI("Boot up with silent.");
+-	}
+-	else{
+-		LOGI("Playing boot sound start.");
+-		ret = system("/system/bin/alsa_aplay -e 6 /system/media/Start.wav");
+-		LOGI("Playing boot sound finish(%d).",ret);
+-	}
++
+ 
+     AudioFlinger::instantiate();
+     MediaPlayerService::instantiate();
